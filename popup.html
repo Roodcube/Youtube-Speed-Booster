@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>YouTube Speed Booster</title>
+    <style>
+      body {
+        width: 250px;
+        padding: 10px;
+        font-family: Arial, sans-serif;
+      }
+      label {
+        display: block;
+        margin: 10px 0 5px;
+      }
+      input[type="range"] {
+        width: 100%;
+      }
+      #speedValue {
+        font-weight: bold;
+        margin-left: 5px;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 10px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+    </style>
+  </head>
+  <body>
+    <label>Playback Speed (0.25x - 16x):
+      <span id="speedValue">1x</span>
+    </label>
+    <input type="range" id="speedSlider" min="0.25" max="16" step="0.25" value="1">
+    <label>
+      <input type="checkbox" id="adSpeedup"> Speed up ads to 16x
+    </label>
+    <button id="apply">Apply</button>
+    <script src="popup.js"></script>
+    <a href="https://www.flaticon.com/free-icons/speedometer" title="speedometer icons">Speedometer icons created by Freepik - Flaticon</a>
+  </body>
+  
+</html>
