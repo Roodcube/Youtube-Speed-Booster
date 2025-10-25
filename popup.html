@@ -15,13 +15,23 @@
       input[type="range"] {
         width: 100%;
       }
-      #speedValue {
+      #speedValue, #speedSlider {
         font-weight: bold;
         margin-left: 5px;
+        color: #ff0931;
+        accent-color: #ff0931;
       }
-      #maxValue {
+      #maxValue, #maxSlider {
         font-weight: bold;
         margin-left: 5px;
+        color: blueviolet;
+        accent-color: blueviolet;
+      }
+      #stepValue, #stepSlider {
+        font-weight: bold;
+        margin-left: 5px;
+        color: royalblue;
+        accent-color: royalblue;
       }
       button {
         width: 100%;
@@ -42,10 +52,14 @@
       <span id="speedValue">1x</span>
     </label>
     <input type="range" id="speedSlider" min="0.25" max="16" step="0.25" value="1">
-    <label>Max Speed for YouTube Slider (0.25x - 16x):
+    <label>Max Speed for Speed Slider (0.25x - 16x):
       <span id="maxValue">1x</span>
     </label>
     <input type="range" id="maxSlider" min="0.25" max="16" step="0.25" value="1">
+    <label>Step for Speed Slider (0.05 - 1):
+      <span id="stepValue">0.25</span>
+    </label>
+    <input type="range" id="stepSlider" min="0.05" max="1" step="0.05" value="0.25">
     <label>
       <input type="checkbox" id="adSpeedup"> Speed up ads to 16x
     </label>
