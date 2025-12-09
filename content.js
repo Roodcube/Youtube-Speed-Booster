@@ -137,7 +137,7 @@ chrome.runtime.onMessage.addListener((message) => {
 function setupGestureDetection() {
   console.log("setupGestureDetection called");
   const video = document.querySelector("video");
-  if (!video) return;
+  if (!video){ console.log("No video found"); return;}
 
   let holdTimeout;
 
@@ -206,7 +206,7 @@ function updatePlaybackSpeedMuteAndQuality() {
 
   } else if (adElement){
     //console.log("Ad detected, but not sped up.");
-    video.playbackRate = 1;
+    video.playbackRate = 1.5;
 
   } else {
     //console.log("No ad, setting speed to", currentSpeed);
@@ -312,47 +312,58 @@ function isYouTubeVideoPage(url = window.location.href) {
   return videoPatterns.some(pattern => pattern.test(url));
 }
 
-function monitorVideo() {
-  //console.log("monitorVideo called");
+function monitorVideo(){
+  console.log("Running monitorVideo")
   const observer = new MutationObserver(() => {
-    console.log("Mutation observed");
+    console.log("Video mutation observed");
+    updatePlaybackSpeedMuteAndQuality();
+  });
+
+  const player = document.querySelector(".html5-video-player") || document.body;
+  observer.observe(player, { childList: true, subtree: true });
+}
+
+function setupOnLoad() {
+
+  let isSearching = false;
+
+  const observer = new MutationObserver(() => {
+
+    if (isSearching) return;
+    isSearching = true;   //Prevents duplicate searches
 
     if (isYouTubeVideoPage()){
-      setTimeout(() => {
-      //While the settings button has not loaded
-        while(!settingButtonLoaded){
-          console.log("Waiting for Settings Button");
-          //Look for the settings button
-          const settingsButton = document.querySelector(".ytp-settings-button");
-  
-          //If it doesn't exit
-          if (!settingsButton){
-            settingButtonLoaded = false;
-            continue;
-  
-          //If the button exists
-          } else {
-            settingButtonLoaded = true;
-            setTimeout(function(){settingsButton.click()}, 5);    //Initialize the settings controls
-            setTimeout(function(){settingsButton.click()}, 5);    //Close the settings menu
-            
-            //Create an event listener to inject the speed slider while the menu is open
-            settingsButton.addEventListener("mouseup", () => {
-              injectCustomSlider();
-            });
-        
-          }
+      //Once every second until the settings button has loaded
+      const intervalID = setInterval(() => {
+        console.log("Waiting for Settings Button");
+        //Look for the settings button
+        const settingsButton = document.querySelector(".ytp-settings-button");
+
+        //If the button exists
+        if (settingsButton){
+          setTimeout(function(){settingsButton.click()}, 5);    //Initialize the settings controls
+          setTimeout(function(){settingsButton.click()}, 5);    //Close the settings menu
+          
+          //Create an event listener to inject the speed slider while the menu is open
+          settingsButton.addEventListener("mouseup", () => {
+            injectCustomSlider();
+          });
+
+          //Finish all the setup
+          injectSliderCSS();
+          setupGestureDetection();
+          monitorVideo();
+
+          //Exit loop
+          clearInterval(intervalID);
+          observer.disconnect();
         }
       }, 1000);
     }
-
-    updatePlaybackSpeedMuteAndQuality();
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
-console.log("Running monitorVideo on load");
-monitorVideo();
-injectSliderCSS();
-setupGestureDetection();
+console.log("Running setup on load");
+setupOnLoad();
