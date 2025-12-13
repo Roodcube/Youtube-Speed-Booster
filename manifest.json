@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "YouTube Speed Booster",
-  "version": "3.2",
+  "version": "3.4",
   "description": "Adjust YouTube playback speed beyond 2x and speed up ads to 16x.",
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "scripting"],
   "content_scripts": [
     {
       "matches": ["*://www.youtube.com/*"],
@@ -17,6 +17,7 @@
       "128": "static/icons/speedometer128.png"
     },
   "action": {
-    "default_popup": "popup.html"
-  }
+    "default_popup": "./Popup/chrome-popup/dist/index.html"
+  },
+  "host_permissions": ["*://*.youtube.com/*"]
 }
