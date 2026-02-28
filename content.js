@@ -1,17 +1,16 @@
 let currentSpeed = 1;
 let maxSpeed = 16;
-let minSpeed = 0.25;
 let sliderStep = 0.25;
 let tempSpeed = 1;
 let speedUpAds = false;
 let wasMutedBeforeAd = false;
-let sliderActive = false;
-let settingButtonLoaded = false;
-let isClickHeld = false;
 let originalQuality = null;
 let adTimeout = null;
 let ytPlayer = null;
 let ytSpeed = null;
+let mainObserver = null;
+let mainVideo = null;
+let currentlyOnShort = null;
 
 console.log("content.js loaded");
 
@@ -26,8 +25,10 @@ function injectSliderCSS() {
         -webkit-appearance: none;
         appearance: none;
         overflow: hidden;
+        display: flex;
         width: 100%;
         height: 24px;
+        align-items: flex-start;
         accent-color: #4d4d4d;
         background: none;
         outline: none;
@@ -65,8 +66,8 @@ function injectSliderCSS() {
         height: 20px;
         background: #ffffff;
         border-radius: 50%;
-        margin-top: -7px;
         transition: background 0.2s;
+        margin-top: 2px;
         box-shadow:	1px 0 0 1px rgb(255,255,255,0.3), 
         			      -9px -7px 8px rgb(255,255,255,0.3),
         			      -9px 7px 8px rgb(255,255,255,0.3),
@@ -115,19 +116,13 @@ chrome.runtime.onMessage.addListener((message) => {
     maxSpeed = message.max
     sliderStep = message.step
     speedUpAds = message.speedUpAds;
-    sliderOffset = parseFloat((currentSpeed % sliderStep).toFixed(2));
-    minSpeed = (0 == sliderOffset) ? sliderStep : sliderOffset;
 
-
-    console.log("Message received - speed:", currentSpeed, "speedUpAds:", speedUpAds, "minSpeed:", minSpeed);
+    console.log("Message received - speed:", currentSpeed, "speedUpAds:", speedUpAds);
 
     if (maxSpeed < currentSpeed){
       currentSpeed = maxSpeed;
     }
 
-    if (minSpeed < 0.1){
-      minSpeed = 0.1;
-    }
     updatePlaybackSpeedMuteAndQuality();
     updateSliderValue(); // Sync slider with popup input
   }
@@ -139,6 +134,8 @@ function setupGestureDetection() {
   const video = document.querySelector("video");
   if (!video){ console.log("No video found"); return;}
 
+  let isClickHeld = false;
+  let isSpaceHeld = false;
   let holdTimeout;
 
   video.addEventListener("mousedown", (e) => {
@@ -155,10 +152,38 @@ function setupGestureDetection() {
     }, 400); // Delay to distinguish click from hold (adjust as needed)
   });
 
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" || isSpaceHeld || e.repeat) return; // Only works with Spacebar and only one at a time
+    holdTimeout = setTimeout(() => {
+      isSpaceHeld = true;
+      try {
+        tempSpeed = currentSpeed;
+        currentSpeed = maxSpeed;
+        console.log("Hold gesture: Set speed to", maxSpeed + "x");
+      } catch (err) {
+        console.error("Error setting hold speed:", err);
+      }
+    }, 400); // Delay to distinguish press from hold (adjust as needed)
+  });
+
   video.addEventListener("mouseup", (e) => {
     clearTimeout(holdTimeout);
     if (isClickHeld) {
       isClickHeld = false;
+      try {
+        currentSpeed = tempSpeed;
+        console.log("Hold released: Reverted to", currentSpeed + "x");
+      } catch (err) {
+        console.error("Error reverting hold speed:", err);
+      }
+    }
+  });
+
+  document.addEventListener("keyup", (e) => {
+    if (e.code !== "Space") return; // Spacebar only
+    clearTimeout(holdTimeout);
+    if (isSpaceHeld) {
+      isSpaceHeld = false;
       try {
         currentSpeed = tempSpeed;
         console.log("Hold released: Reverted to", currentSpeed + "x");
@@ -184,9 +209,11 @@ function setupGestureDetection() {
 
 function updatePlaybackSpeedMuteAndQuality() {
   //console.log("updatePlaybackSpeedMuteAndQuality called");
-  const video = document.querySelector("video");
+  //const video = document.querySelector("video");
+  //const video = findActiveVideo();
+  const video = mainVideo;
   if (!video) {
-    //console.log("No video element found");
+    console.log("No video element found");
     return;
   }
 
@@ -247,6 +274,13 @@ function injectCustomSlider() {
         return;
       }
 
+      //Calculate the minimum value for custom slider
+      sliderOffset = parseFloat((currentSpeed % sliderStep).toFixed(2));
+      minSpeed = (0 == sliderOffset) ? sliderStep : sliderOffset;
+      if (minSpeed < 0.1){
+        minSpeed = 0.1;
+      }
+
       // Inject custom slider
       const sliderContainer = document.createElement("div");
       sliderContainer.className = "ytp-menuitem";
@@ -299,7 +333,6 @@ function updateSliderValue() {
   }
 }
 
-// content.js or background.js
 function isYouTubeVideoPage(url = window.location.href) {
   const videoPatterns = [
     /^https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]{11}/i, // Standard video
@@ -312,15 +345,72 @@ function isYouTubeVideoPage(url = window.location.href) {
   return videoPatterns.some(pattern => pattern.test(url));
 }
 
-function monitorVideo(){
-  console.log("Running monitorVideo")
-  const observer = new MutationObserver(() => {
-    console.log("Video mutation observed");
-    updatePlaybackSpeedMuteAndQuality();
-  });
+function isYouTubeShort(url = window.location.href) {
+  const videoPatterns = [
+    /^https?:\/\/(www\.)?youtube\.com\/shorts\/[\w-]{11}/i,  // Shorts
+  ];
 
-  const player = document.querySelector(".html5-video-player") || document.body;
-  observer.observe(player, { childList: true, subtree: true });
+  return videoPatterns.some(pattern => pattern.test(url));
+}
+
+function monitorVideo(){
+  //console.log("Running monitorVideo");
+
+  if (mainObserver == null){
+    mainObserver = new MutationObserver(() => {
+      console.log("Video mutation observed");
+      updatePlaybackSpeedMuteAndQuality();
+    });
+  }else{
+    mainObserver.disconnect();
+  }
+
+  let player;
+
+  if(isYouTubeShort()){
+    player = document.body;
+    console.log("YouTube Short detected, player = document.body");
+  }else{
+    //player = findActiveVideo().parentNode.parentNode;
+    player = mainVideo.parentNode.parentNode;
+  }
+
+  mainObserver.observe(player, { childList: true, subtree: true });
+}
+
+function findActiveVideo(){
+  if(!isYouTubeVideoPage() || (isYouTubeShort() === currentlyOnShort)){
+    console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Can use same player");
+    return mainVideo;
+  }
+  console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Need new player");
+
+
+  videos = document.getElementsByClassName("video-stream");
+  if(videos.length == 1){
+
+    console.log("Only one video, returning");
+    return videos[0];
+
+  }else if(videos.length > 1){
+
+    console.log("Multiple videos");
+    for (let i = 0; i < videos.length; i++){
+
+      if(videos[i].src !== ''){
+
+        console.log("Active video found:", i);
+        return videos[i];
+      }
+    };
+
+    console.log("No video is active");
+    return document.body;
+
+  }else{
+    console.log("No videos found");
+    return document.body;
+  }
 }
 
 function setupOnLoad() {
@@ -341,29 +431,50 @@ function setupOnLoad() {
 
         //If the button exists
         if (settingsButton){
+
           setTimeout(function(){settingsButton.click()}, 5);    //Initialize the settings controls
           setTimeout(function(){settingsButton.click()}, 5);    //Close the settings menu
-          
+        
+          //Load saved speed settings
+          chrome.storage.sync.get(["playbackSpeed", "maxSpeed", "sliderStep"], (data) => {
+            currentSpeed = data.playbackSpeed || 1;
+            maxSpeed = data.maxSpeed || 16;
+            sliderStep = data.sliderStep || 0.25;
+          });
+
           //Create an event listener to inject the speed slider while the menu is open
           settingsButton.addEventListener("mouseup", () => {
             injectCustomSlider();
           });
 
-          //Finish all the setup
+          //Finish other setup
           injectSliderCSS();
           setupGestureDetection();
+          mainVideo = findActiveVideo();
+          currentlyOnShort = isYouTubeShort();
           monitorVideo();
+          document.addEventListener("yt-navigate-finish", () => {
 
-          //Exit loop
-          clearInterval(intervalID);
-          observer.disconnect();
+            console.log("yt-navigate-finish detected, new video targeted");
+            mainVideo = findActiveVideo();
+            if(isYouTubeVideoPage()) currentlyOnShort = isYouTubeShort();
+            monitorVideo();
+          });
+
+        //Exit loop
+        clearInterval(intervalID);
+        observer.disconnect();
         }
       }, 1000);
+    }else{
+      console.log("Not a YouTube Page. Not waiting for Settings Button");
+      document.addEventListener("yt-navigate-finish", () => {
+        setupOnLoad();
+      }, {once: true});
     }
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
-console.log("Running setup on load");
 setupOnLoad();
