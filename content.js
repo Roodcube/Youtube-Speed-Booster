@@ -2,6 +2,7 @@ let currentSpeed = 1;
 let maxSpeed = 16;
 let sliderStep = 0.25;
 let tempSpeed = 1;
+let clickGestureCount = 0;
 let speedUpAds = false;
 let wasMutedBeforeAd = false;
 let originalQuality = null;
@@ -9,8 +10,11 @@ let adTimeout = null;
 let ytPlayer = null;
 let ytSpeed = null;
 let mainObserver = null;
+let isObserverEnabled = false;   //Disabled by default
 let mainVideo = null;
 let currentlyOnShort = null;
+let keepChecking = false;
+let spaceGestureSetup = false;
 
 console.log("content.js loaded");
 
@@ -129,14 +133,14 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 // Gesture detection for click-and-hold on video
-function setupGestureDetection() {
+function setupGestureDetection(video) {
   console.log("setupGestureDetection called");
-  const video = document.querySelector("video");
   if (!video){ console.log("No video found"); return;}
 
   let isClickHeld = false;
-  let isSpaceHeld = false;
   let holdTimeout;
+
+  clickGestureCount++;      //Keeps track of the number of click EventListeners
 
   video.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return; // Left mouse only
@@ -152,38 +156,10 @@ function setupGestureDetection() {
     }, 400); // Delay to distinguish click from hold (adjust as needed)
   });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.code !== "Space" || isSpaceHeld || e.repeat) return; // Only works with Spacebar and only one at a time
-    holdTimeout = setTimeout(() => {
-      isSpaceHeld = true;
-      try {
-        tempSpeed = currentSpeed;
-        currentSpeed = maxSpeed;
-        console.log("Hold gesture: Set speed to", maxSpeed + "x");
-      } catch (err) {
-        console.error("Error setting hold speed:", err);
-      }
-    }, 400); // Delay to distinguish press from hold (adjust as needed)
-  });
-
   video.addEventListener("mouseup", (e) => {
     clearTimeout(holdTimeout);
     if (isClickHeld) {
       isClickHeld = false;
-      try {
-        currentSpeed = tempSpeed;
-        console.log("Hold released: Reverted to", currentSpeed + "x");
-      } catch (err) {
-        console.error("Error reverting hold speed:", err);
-      }
-    }
-  });
-
-  document.addEventListener("keyup", (e) => {
-    if (e.code !== "Space") return; // Spacebar only
-    clearTimeout(holdTimeout);
-    if (isSpaceHeld) {
-      isSpaceHeld = false;
       try {
         currentSpeed = tempSpeed;
         console.log("Hold released: Reverted to", currentSpeed + "x");
@@ -205,10 +181,44 @@ function setupGestureDetection() {
       }
     }
   });
+
+  if (!spaceGestureSetup){
+    console.log("Spacebar gesture is being setup");
+    spaceGestureSetup = true;
+    let isSpaceHeld = false;
+
+    document.addEventListener("keydown", (e) => {
+      if (e.code !== "Space" || isSpaceHeld || e.repeat) return; // Only works with Spacebar and only one at a time
+      holdTimeout = setTimeout(() => {
+        isSpaceHeld = true;
+        try {
+          tempSpeed = currentSpeed;
+          currentSpeed = maxSpeed;
+          console.log("Hold gesture: Set speed to", maxSpeed + "x");
+        } catch (err) {
+          console.error("Error setting hold speed:", err);
+        }
+      }, 400); // Delay to distinguish press from hold (adjust as needed)
+    });
+
+    document.addEventListener("keyup", (e) => {
+      if (e.code !== "Space") return; // Spacebar only
+      clearTimeout(holdTimeout);
+      if (isSpaceHeld) {
+        isSpaceHeld = false;
+        try {
+          currentSpeed = tempSpeed;
+          console.log("Hold released: Reverted to", currentSpeed + "x");
+        } catch (err) {
+          console.error("Error reverting hold speed:", err);
+        }
+      }
+    });
+  }
 }
 
 function updatePlaybackSpeedMuteAndQuality() {
-  //console.log("updatePlaybackSpeedMuteAndQuality called");
+  console.log("updatePlaybackSpeedMuteAndQuality called");
   //const video = document.querySelector("video");
   //const video = findActiveVideo();
   const video = mainVideo;
@@ -219,7 +229,7 @@ function updatePlaybackSpeedMuteAndQuality() {
 
   const adElement = document.querySelector(".ad-showing");
   if (adElement && speedUpAds) {
-    //console.log("Ad detected");
+    console.log("Ad detected");
     if (!video.muted) {
       wasMutedBeforeAd = false;
       video.muted = true;
@@ -232,7 +242,7 @@ function updatePlaybackSpeedMuteAndQuality() {
     }, 1500);
 
   } else if (adElement){
-    //console.log("Ad detected, but not sped up.");
+    console.log("Ad detected, but not sped up.");
     video.playbackRate = 1.5;
 
   } else {
@@ -253,7 +263,7 @@ function updatePlaybackSpeedMuteAndQuality() {
 }
 
 function injectCustomSlider() {
-  console.log("injectCustomSlider called");
+  //console.log("injectCustomSlider called");
 
   const settingsMenu = document.querySelector(".ytp-settings-button");
   if (!settingsMenu) {
@@ -315,8 +325,16 @@ function injectCustomSlider() {
       const speedValue = document.getElementById("speed-value");
 
       slider.addEventListener("input", (e) => {
+        //currentSpeed = parseFloat(e.target.value);
+        //speedValue.textContent = `${currentSpeed}x`;
+        speedValue.textContent = `${e.target.value}x`;
+        //  console.log("Slider updated speed to:", currentSpeed);
+      });
+
+      slider.addEventListener("mouseup", (e) => {
         currentSpeed = parseFloat(e.target.value);
-        speedValue.textContent = `${currentSpeed}x`;
+        updatePlaybackSpeedMuteAndQuality();
+        //speedValue.textContent = `${currentSpeed}x`;
         //  console.log("Slider updated speed to:", currentSpeed);
       });
     }
@@ -353,64 +371,97 @@ function isYouTubeShort(url = window.location.href) {
   return videoPatterns.some(pattern => pattern.test(url));
 }
 
-function monitorVideo(){
+function monitorVideo(monitor){
   //console.log("Running monitorVideo");
 
-  if (mainObserver == null){
-    mainObserver = new MutationObserver(() => {
-      console.log("Video mutation observed");
-      updatePlaybackSpeedMuteAndQuality();
+  if (monitor == isObserverEnabled) return;
+
+  if (monitor) {
+    if (!mainObserver) {
+      mainObserver = new MutationObserver(() => {
+        console.log("Video mutation observed");
+
+        // Re-find video and update if needed
+        if (mainVideo.src === '' || mainVideo.playbackRate !== currentSpeed || document.querySelector(".ad-showing")) {
+          mainVideo = findActiveVideo();
+          if (mainVideo) {
+            updatePlaybackSpeedMuteAndQuality();
+          }
+        }
+      });
+    }
+
+    // Determine target player
+    const player = currentlyOnShort 
+      ? document.body 
+      : (mainVideo?.parentNode?.parentNode || document.body);
+
+    mainObserver.observe(player, { 
+      childList: true, 
+      subtree: true 
     });
-  }else{
-    mainObserver.disconnect();
+
+    isObserverEnabled = true;
+    console.log("MutationObserver ENABLED on", currentlyOnShort ? "body (Shorts)" : "player container");
+
+  } else {
+    if (mainObserver) {
+      mainObserver.disconnect();
+      console.log("MutationObserver DISABLED");
+    }
+    isObserverEnabled = false;
   }
-
-  let player;
-
-  if(isYouTubeShort()){
-    player = document.body;
-    console.log("YouTube Short detected, player = document.body");
-  }else{
-    //player = findActiveVideo().parentNode.parentNode;
-    player = mainVideo.parentNode.parentNode;
-  }
-
-  mainObserver.observe(player, { childList: true, subtree: true });
 }
 
 function findActiveVideo(){
-  if(!isYouTubeVideoPage() || (isYouTubeShort() === currentlyOnShort)){
-    console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Can use same player");
+  if(!isYouTubeVideoPage() || (isYouTubeShort() === currentlyOnShort) && (mainVideo !== null) && (mainVideo.src !== '') && (!keepChecking)){
+    console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Keep Checking:", keepChecking, "Can use same player");
     return mainVideo;
   }
-  console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Need new player");
-
+  console.log("On YouTube: ", isYouTubeVideoPage(), "Going to Short: ", isYouTubeShort(), "Coming from Short: ", currentlyOnShort, "Keep Checking:", keepChecking, "Main video:", mainVideo !== null, "Need new player");
+  if (mainVideo){
+    console.log("Main Video Source: ", mainVideo.src);
+  }
 
   videos = document.getElementsByClassName("video-stream");
   if(videos.length == 1){
 
-    console.log("Only one video, returning");
+    console.log("Only one real video, returning");
     return videos[0];
 
   }else if(videos.length > 1){
 
     console.log("Multiple videos");
-    for (let i = 0; i < videos.length; i++){
+    for (let i = 0; i < videos.length; i++){ //Last video player seems dedicated to advertisements
 
       if(videos[i].src !== ''){
 
         console.log("Active video found:", i);
+        if (i == videos.length - 1){
+          keepChecking = true;  //Be skeptical of the last video player
+          setTimeout(() => {mainVideo = findActiveVideo()}, 2000);
+        }else{
+          keepChecking = false;
+        }
+
+        console.log("clickGestureCount: ", clickGestureCount, " videos: ", videos.length);
+        if(clickGestureCount < videos.length - 1) setupGestureDetection(videos[i]);
+
         return videos[i];
       }
     };
 
     console.log("No video is active");
-    return document.body;
+    //In the event that no active video is found, wait two seconds and try again.
+    setTimeout(() => {mainVideo = findActiveVideo()}, 2000);
+    return mainVideo;
 
   }else{
     console.log("No videos found");
     return document.body;
   }
+
+    //return document.activeElement.getElementsByClassName("video-stream")[0];
 }
 
 function setupOnLoad() {
@@ -449,16 +500,20 @@ function setupOnLoad() {
 
           //Finish other setup
           injectSliderCSS();
-          setupGestureDetection();
+          setupGestureDetection(document.querySelector("video"));
           mainVideo = findActiveVideo();
           currentlyOnShort = isYouTubeShort();
-          monitorVideo();
+          monitorVideo(true);
           document.addEventListener("yt-navigate-finish", () => {
-
+            updatePlaybackSpeedMuteAndQuality();
             console.log("yt-navigate-finish detected, new video targeted");
-            mainVideo = findActiveVideo();
-            if(isYouTubeVideoPage()) currentlyOnShort = isYouTubeShort();
-            monitorVideo();
+            if(isYouTubeVideoPage()){
+              mainVideo = findActiveVideo();
+              currentlyOnShort = isYouTubeShort();
+              monitorVideo(true);
+            }else{
+              monitorVideo(false);
+            }
           });
 
         //Exit loop
